@@ -38,29 +38,65 @@ void test(A... args)
   }
 }
 
-int main()
+template<class T>
+void test(T r)
+{
+	using namespace std;
+	int x, x1, x2;
+	int loop_count = 1000000;
+
+	StopWatch sw;
+	for (int z = 0; z < loop_count; z++) {
+		x = iround(r);
+	}
+	cout << "self implemenation: " << sw.lap() << " ms" << endl;
+	sw.lap();
+	for (int z = 0; z < loop_count; z++) {
+		x1 = iround2(r);
+	}
+	cout << "round base: " << sw.lap() << " ms" << endl;
+	sw.lap();
+	for (int z = 0; z < loop_count; z++) {
+		x2 = iround3(r);
+	}
+	cout << "lround base: " << sw.lap() << " ms" << endl;
+
+	cout << r << " " << x << " " << x1 << " "<< x2 <<endl;
+}
+
+void main()
+{
+	using namespace std;
+	cout << "float" << endl;
+	float rf = rand() / 10.f;
+	test(rf);
+
+	cout << endl << "double" << endl;
+	double rd = rand() / 10.0;
+	test(rd);
+	
+	cout << endl<< "long double" << endl;
+	long double rlld = rand() / 10.l;
+	test(rlld);
+}
+
+int main6()
 {
   using namespace std;
 
-
-
   auto src = Mtx1b::createWithBorder(1920, 1080, 1);
+  auto ref = Mtx1b::createWithBorder(src.size(), 1);
   Mtx1b dst(src.size());
-  Mtx1b ref(src.size());
-  fill_value(src);
+  fill_test_value(src);
   int h = src.rows;
   int w = src.cols;
   int loop_count = 10;
 
   src.extrapolate();
-  // print(src);
+//  print(src);
 
-  Kernel<int, 1> ker;
-  int arr[]{1, 2, 1, 2, 4, 2, 1, 2, 1};
-  ker.copy(arr);
+  Kernel<int, 1> ker(1, 2, 1, 2, 4, 2, 1, 2, 1);
 
-  // for_dydx(1, 1, [&](int dy, int dx) { cout << k(dy, dx) << endl;
-  // });
   StopWatch sw;
   cout << "case0: ";
   cv::GaussianBlur(src, dst, cv::Size(3, 3), 0);
@@ -87,7 +123,8 @@ int main()
     }
   }
   cout << sw.lap() << endl;
-  //print(ref);
+  ref.extrapolate();
+//  print(ref);
   cout << "case2: ";
   for(int z = 0; z < loop_count; z++) {
     src.extrapolate();
@@ -178,7 +215,6 @@ int main()
       auto pd = dst[y];
       int sum[4096] = {};
 #if 1
-      //    for_pd_idx<32>(w,  sum, [&](auto& psum, int d) { psum[d] = 0; });
       for_dydx(ker.radius, ker.radius, [&](int dy, int dx) {
         int k = ker(dy, dx);
         auto ps = src[0] + src.stepT() * (dy + y) + dx;
@@ -186,14 +222,12 @@ int main()
       });
       for_psd_idx<32>(w, sum, pd, [&](auto& psum, auto& pd, int d) { pd[d] = psum[d] / 16; });
     }
-#elif 1
-      //      for_psd_idx<32>(w, sum, pd, [&](auto& ps, auto& pd, int d) { pd[d] = 0; });
+#else
       ker.for_([&](auto&& k, int dy, int dx) {
         auto ps = src[0] + src.stepT() * (dy + y) + dx;
         for_psd_idx<32>(w, ps, sum, [&](auto& ps, auto& pd, int d) { pd[d] += k * ps[d]; });
       });
       for_psd_idx<32>(w, sum, pd, [&](auto& ps, auto& pd, int d) { pd[d] = ps[d] / 16; });
-#else
 
 #endif
   }
@@ -229,6 +263,38 @@ int main()
   }
   cout << sw.lap() << endl;
   cout << "check: " << check_value(dst, ref) << endl << endl;
+
+  cout << "case10: ";
+  //SepKernel<int, 1> sker(2, 1);
+  for(int z = 0; z < loop_count; z++) {
+    src.extrapolate();
+    auto tmp = Mtx1i::createWithBorder(src.size(), sker.radius);
+#pragma omp parallel for
+    for(int y = 0; y < h; y++) {
+      auto ptl = tmp[y];
+      for_p_idx<32>(w, ptl, [&](auto& pt, int d) { pt[d] = 0; });
+      for(int dy = -sker.radius; dy <= sker.radius; dy++) {
+        auto k = sker(dy);
+        auto psl = src[0] + src.stepT() * (dy + y);
+        for_psd_idx<32>(w, psl, ptl, [&](auto& ps, auto& pt, int d) { pt[d] += k * ps[d]; });
+      }
+    }
+    tmp.extrapolate();
+#pragma omp parallel for
+    for(int y = 0; y < h; y++) {
+      auto pdl = dst[y];
+      for(int dx = -sker.radius; dx <= sker.radius; dx++) {
+        auto k = sker(dx);
+        auto ptl = tmp[0] + tmp.stepT() * y + dx;
+        for_psd_idx<32>(w, ptl, pdl, [&](auto& pt, auto& pd, int d) { pd[d] += k * pt[d]; });
+      }
+      for_p_idx<32>(w, pdl, [&](auto& pd, int d) { pd[d] /= 16; });
+    }
+  }
+  cout << sw.lap() << endl;
+  cout << "check: " << check_value(dst, ref) << endl << endl;
+//  print(ref);
+return 1;
 }
 
 int main5()
@@ -240,7 +306,7 @@ int main5()
   //fill_value(mtx);
   //print(mtx);
   auto mtx2 = Mtx1b::createWithBorder(mtx.size(), 1);
-  fill_value(mtx2);
+  fill_test_value(mtx2);
   mtx2.extrapolate();
 
   //cout << "入力" << endl;
@@ -252,7 +318,7 @@ int main5()
   });
   cout << sw.lap() << endl;
   cv::Mat1b mat1(10000, 10000);
-  fill_value(mat1);
+  fill_test_value(mat1);
   cv::Mat mat2;
   sw.lap();
   Sobel(mat1, mat2, CV_8U, 1, 0, 3);
@@ -270,7 +336,7 @@ int main3()
 
   //入力用データ生成
   Mtx1w mtx(10, 10);
-  fill_value(mtx);
+  fill_test_value(mtx);
 
   //(1)(1)Offset値参照によるアドレス計算の省略機能
   cout << "(1)Offset値参照によるアドレス計算の省略機能" << endl;
@@ -290,7 +356,7 @@ int main3()
   //(2)画面外の画素値の参照
   cout << "(2)画面外の画素値の参照" << endl;
   auto mtx_ext = Mtx1i::createWithBorder(10, 10, 1, 2);
-  fill_value(mtx_ext);
+  fill_test_value(mtx_ext);
   mtx_ext.extrapolate();
   print(mtx_ext);
 

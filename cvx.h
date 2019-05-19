@@ -1,78 +1,15 @@
+#if !defined(CVX_H)
+#define CVX_H
+
 #include <opencv2/opencv.hpp>
 #include <opencv2/highgui/highgui.hpp>
 
 #include <chrono>
-#include <thread>  //std::thread::hardware_concurrency()をコールするため
+#include <thread>
 #include <mutex>
+#include <valarray>
 
 namespace cvx {
-
-struct StopWatch
-{
-  StopWatch() { pre_ = std::chrono::high_resolution_clock::now(); }
-
-  double lap()
-  {
-    auto tmp = std::chrono::high_resolution_clock::now();  // 計測終了時刻を保存
-    auto dur = tmp - pre_;
-    pre_ = tmp;
-    return std::chrono::duration_cast<std::chrono::nanoseconds>(dur).count() / 1000000.0;
-  }
-  std::chrono::high_resolution_clock::time_point pre_;
-};
-
-template<class VECD, class FUNC, class VEC>
-VECD conv(const VEC& s, FUNC conv)
-{
-  constexpr int ch = VEC::channels < VECD::channels ? VEC::channels : VECD::channels;
-  VECD ret;
-  for(int i = 0; i < ch; i++) {
-    ret[i] = conv(s[i]);
-  }
-  return ret;
-}
-
-template<class VECD, class FUNC, class VEC>
-void conv(const VEC& s, VECD& d, FUNC conv)
-{
-  constexpr int ch = VEC::channels < VECD::channels ? VEC::channels : VECD::channels;
-  for(int i = 0; i < ch; i++) {
-    conv(s[i], d[i]);
-  }
-}
-
-template<class VEC, class FUNC>
-VEC conv(const VEC& s, FUNC conv)
-{
-  constexpr int ch = VEC::channels;
-  VEC ret;
-  for(int i = 0; i < ch; i++) {
-    ret[i] = conv(s[i]);
-  }
-  return ret;
-}
-
-template<class VECD, class FUNC, class VEC>
-VECD convIdx(const VEC& s, FUNC conv)
-{
-  constexpr int ch = VEC::channels < VECD::channels ? VEC::channels : VECD::channels;
-  VECD ret;
-  for(int i = 0; i < ch; i++) {
-    ret[i] = conv(s[i], i);
-  }
-  return ret;
-}
-
-template<class VEC, class FUNC>
-VEC convIdx(const VEC& s, FUNC conv)
-{
-  constexpr int ch = VEC::channels;
-  VEC ret;
-  for(int i = 0; i < ch; i++) {
-    ret[i] = conv(s[i], i);
-  }
-  return ret;
-}
 
 struct Offset
 {
@@ -92,36 +29,49 @@ struct Offset
   size_t offset;
 };
 
-//二次元アクセル可能な、画素値用ポインタークラス
-template<class T>
+//二次元アクセス可能な画素値用ポインタークラス
+template<class _T>
 struct PixPtr
 {
 public:
+	using T = std::remove_cv_t<_T>;
+
   PixPtr(T* ptr, size_t step)
       : ptr_(ptr)
       , step_(step)
   {
   }
-  T& operator()(int dy, int dx) { return ptr_[step_ * dy + dx]; }
-  const T& operator()(int dy, int dx) const { return ptr_[step_ * dy + dx]; }
+
+	const T* ptr() const { return ptr_; }
+  T* ptr() { return ptr_; }
+
+  inline T* ptr(int dy, int dx) { return ptr_ + step_ * dy + dx; }
+  inline const T* ptr(int dy, int dx) const { return ptr_ + step_ * dy + dx; }
+
+  inline T& operator()(int dy, int dx) { return *ptr(dy, dx); }
+  inline const T& operator()(int dy, int dx) const { return *ptr(dy, dx); }
 
   void operator++() { ++ptr_; }
   void operator++(int) { ptr_++; }
   void operator+=(size_t v) { ptr_ += v; }
   void operator-=(size_t v) { ptr_ -= v; }
 
-  const T* pointer() const { return ptr_; }
-  T* pointer() { return ptr_; }
+  void moveLine(int dy) { ptr += dy * step_; }
+
+  PixPtr copyPixPtr(int dy, int dx) { return PixPtr(ptr + dy * step_ + dx, step); }
+
+  const PixPtr copyPixPtr(int dy, int dx) const { return PixPtr(ptr + dy * step_ + dx, step); }
 
 private:
   size_t step_;
   T* ptr_;
 };
 
-template<class T>
-class Mtx_ : public cv::Mat_<T>
+template<class _T>
+class Mtx_ : public cv::Mat_<_T>
 {
 public:
+  using T = std::remove_cv_t<_T>; 
   using cv::Mat_<T>::Mat_;
   using cv::Mat_<T>::operator();  //overloadしているので必要
   using cv::Mat_<T>::stepT;
@@ -129,6 +79,9 @@ public:
   using cv::Mat_<T>::cols;
 
   Offset calcOffset(int y, int x) const { return Offset(stepT(0) * y + x); }
+  Offset calcOffset(const PixPtr<const T>& pp) const {
+		return Offset(dataT() - pp.ptr(0,0)); 
+	}
 
   T& operator()(const Offset& offset) { return dataT()[offset.offset]; }
 
@@ -137,6 +90,9 @@ public:
   const T& operator()(int y, int x) const { return dataT()[y * stepT() + x]; }
 
   T& operator()(int y, int x) { return dataT()[y * stepT() + x]; }
+
+  T* operator[](int y) { return dataT() + y * stepT(); }
+  const T* operator[](int y) const { return dataT() + y * stepT(); }
 
   T operator()(float y, float x)
   {
@@ -167,7 +123,7 @@ public:
 
     float v0 = v00 * (fx1 - x) + v01 * (x - fx0);
     float v1 = v10 * (fx1 - x) + v11 * (x - fx0);
-    return v0 * (fy1 - y) + v1 * (y - fy0);
+    return static_cast<T>(v0 * (fy1 - y) + v1 * (y - fy0));
   }
 
   T operator()(cv::Point2f pt) { return (*this)(pt.y, pt.x); }
@@ -179,7 +135,7 @@ public:
     Mtx_<T> mtx2 = mat(cv::Rect(hborder, vborder, _cols, _rows));
     return mtx2;
   }
-
+	
   static Mtx_<T> createWithBorder(cv::Size sz, int vborder, int hborder = -1)
   {
     if(hborder < 0) hborder = vborder;
@@ -204,6 +160,8 @@ public:
   {
     const auto vborder = vertBorder();
     const auto hborder = horzBorder();
+#if 0
+#else
     //Left
     for(int y = 0; y < rows; y++) {
       auto pix = (*this)(y, 0);
@@ -255,12 +213,18 @@ public:
       }
     }
 #endif
+#endif
   }
-  PixPtr<const T> getPixPtr(int y, int x) const
+  const PixPtr<T> createPixPtr(Offset offset) const
   {
-    return PixPtr<const T>(dataT() + y * stepT() + x, stepT());
+    return PixPtr<T>(dataT() + offset.offset);
   }
-  PixPtr<T> getPixPtr(int y, int x) { return PixPtr<T>(dataT() + y * stepT() + x, stepT()); }
+ 
+  const PixPtr<T> createPixPtr(int y, int x) const
+  {
+    return PixPtr<T>(const_cast<T*>(dataT()) + y * stepT() + x, stepT());
+  }
+  PixPtr<T> createPixPtr(int y, int x) { return PixPtr<T>(dataT() + y * stepT() + x, stepT()); }
 
 private:
   const T* dataT() const { return reinterpret_cast<const T*>(this->data); }
@@ -269,12 +233,14 @@ private:
 };
 
 using Mtx1b = Mtx_<uchar>;
+using Mtx2b = Mtx_<cv::Vec2b>;
 using Mtx3b = Mtx_<cv::Vec3b>;
 using Mtx4b = Mtx_<cv::Vec4b>;
 using Mtx1i = Mtx_<int>;
 using Mtx1w = Mtx_<unsigned short>;
 using Mtx1f = Mtx_<float>;
-using Mtx3f = Mtx_<cv::Vec4f>;
+using Mtx2f = Mtx_<cv::Vec2f>;
+using Mtx3f = Mtx_<cv::Vec3f>;
 using Mtx4f = Mtx_<cv::Vec4f>;
 
 template<class T>
@@ -291,146 +257,58 @@ void print(const Mtx_<T>& m)
   }
 }
 
-template<class T, class FUNC, class TD = T>
-void paral_for_pp(const Mtx_<T>& src, Mtx_<TD>& dst, FUNC func)
-{
-#pragma omp parallel for
-  for(int y = 0; y < src.rows; y++) {
-    auto ps = src.getPixPtr(y, 0);
-    auto pd = dst.getPixPtr(y, 0);
-    for(int x = 0; x < src.cols; x++) {
-      pd(0, 0) = func(ps);
-      ps++;
-      pd++;
-    }
-  }
-}
 
-template<int AL, class T, class TD, class FUNC>
-void for_psd_idx(int n, T* ps, TD* pd, FUNC func)
-{
-  int nn = n / AL * AL;
-  int i = 0;
-  T* pst = ps;
-  TD* pdt = pd;
-  for(; i < nn; i += AL) {
-    for(int j = 0; j < AL; j++) {
-      func(pst, pdt, j);
-    }
-    pst += AL;
-    pdt += AL;
-  }
-  int j = 0;
-  for(; i < n; i++) {
-    func(pst, pdt, j);
-    j++;
-  }
-}
-
-template<int AL, class TD, class FUNC>
-void for_p_idx(int n, TD* p, FUNC func)
-{
-  int nn = n / AL * AL;
-  int i = 0;
-  TD* pdt = p;
-  for(; i < nn; i += AL) {
-    for(int j = 0; j < AL; j++) {
-      func(pdt, j);
-    }
-    pdt += AL;
-  }
-  int j = 0;
-  for(; i < n; i++) {
-    func(pdt, j);
-    j++;
-  }
-}
-
-template<class FUNC>
-void for_dydx(int vr, int hr, FUNC func)
-{
-  for(int dy = -vr; dy <= vr; dy++) {
-    for(int dx = -hr; dx <= hr; dx++) {
-      func(dy, dx);
-    }
-  }
-}
-
-template<class MAT>
-void fill_value(MAT& m)
-{
-  int i = 0;
-  for(int y = 0; y < m.rows; y++) {
-    for(int x = 0; x < m.cols; x++) {
-      m(y, x) = i;
-      i++;
-    }
-  }
-}
-
-template<class T>
-bool check_value(const Mtx_<T>& src, Mtx_<T>& ref, int border = 0)
-{
-  for(int y = -border; y < src.rows + border; y++) {
-    auto ps = src.getPixPtr(y, 0);
-    auto pr = ref.getPixPtr(y, 0);
-    for(int x = -border; x < src.cols + border; x++) {
-      if(pr(0, 0) != ps(0, 0)) return false;
-      ps++;
-      pr++;
-    }
-  }
-  return true;
-}
 
 template<class T, int RSZ>
 struct Kernel
 {
   static constexpr int SZ = RSZ * 2 + 1;
-  T operator()(int dy, int dx) { return data[SZ * (dy + RSZ) + (dx + RSZ)]; }
-  
+  inline T operator()(int dy, int dx) { return data[SZ * (dy + RSZ) + (dx + RSZ)]; }
+  inline T operator()(int dy, int dx) const { return data[SZ * (dy + RSZ) + (dx + RSZ)]; }
+
   void copy(T* p) { std::memcpy(data, p, SZ * SZ * sizeof(T)); }
   T data[SZ * SZ];
   static constexpr int radius = RSZ;
 
   template<class FUNC>
-  void for_(FUNC func)
+  inline void for_(FUNC func)
   {
     for_dydx(radius, radius, [&](int dy, int dx) { func((*this)(dy, dx), dy, dx); });
   }
 
   template<class TP>
-  T convolute(const PixPtr<TP>& pp)
+  T convolute(const PixPtr<TP>& pp) const
   {
     T sum = 0;
-    for_dydx(radius, radius, [&](int dy, int dx) { sum += (*this)(dy, dx)  * pp(dy, dx); });
+    for_dydx(radius, radius, [&](int dy, int dx) { sum += (*this)(dy, dx) * pp(dy, dx); });
     return sum;
   }
+  Kernel() = default;
+
   template<class... A>
   Kernel(A... args)
   {
     int j = 0;
     for(int i : std::initializer_list<int>{args...}) {
       data[j] = i;
-//      if(j == ) break;
+      //      if(j == ) break;
       j++;
     }
   }
-
 };
 
 template<class T, int RSZ>
 struct SepKernel
 {
-  T operator()(int d) { return data[d]; }
-  void copy(T* p) { std::memcpy(data, p, (RSZ+1) * sizeof(T)); }
-  T data[RSZ +1];
+  T operator()(int d) { return data[std::abs(d)]; }
+  void copy(T* p) { std::memcpy(data, p, (RSZ + 1) * sizeof(T)); }
+  T data[RSZ + 1];
   static constexpr int radius = RSZ;
 
   template<class TP>
   T convolute(const PixPtr<TP>& pp, bool horz)
   {
- //   std::vector<T> lines((2 * RSZ + 1) * pp.step_);
+    //   std::vector<T> lines((2 * RSZ + 1) * pp.step_);
     T sum = data[0] * pp(0, 0);
     if(horz) {
       for(int d = 1; d <= RSZ; d++) {
@@ -443,21 +321,126 @@ struct SepKernel
     }
     return sum;
   }
-  template<class... A> 
+  template<class... A>
   SepKernel(A... args)
   {
     int j = 0;
     for(T i : std::initializer_list<int>{args...}) {
- 	  data[j] = i;
+      data[j] = i;
       if(j == RSZ) break;
-	  j++;
+      j++;
     }
     j++;
     for(; j <= RSZ; j++) {
       data[j] = 0;
-	}
+    }
   }
 };
+#if 1
+template<int UNIT, class T, class TD, class FUNC>
+inline void transform(const T* ps, TD* pd, int n, FUNC func)
+{
+  const int nUNIT = n / UNIT * UNIT;
+  const int n8 = n / 8 * 8;
+  int i = 0;
+  const T* pst = ps;
+  TD* pdt = pd;
+  for(; i < nUNIT; i += UNIT) {
+    for(int j = 0; j < UNIT; j++) {
+      pdt[j] = func(pst[j]);
+    }
+    pst += UNIT;
+    pdt += UNIT;
+  }
+  for(; i < n8; i += 8) {
+    for(int j = 0; j < 8; j++) {
+      pdt[j] = func(pst[j]);
+    }
+    pst += 8;
+    pdt += 8;
+  }
+  int j = 0;
+  for(; i < n; i++) {
+    pdt[j] = func(pst[j]);
+    j++;
+  }
+}
+#else
+
+template<int UNIT, class T, class TD>
+inline void transform(const T* ps, TD* pd, int n, std::function<TD(const T&)>)
+{
+  const int nUNIT = n / UNIT * UNIT;
+  const int n8 = n / 8 * 8;
+  int i = 0;
+  const T* pst = ps;
+  TD* pdt = pd;
+  for(; i < nUNIT; i += UNIT) {
+    for(int j = 0; j < UNIT; j++) {
+      pdt[j] = func(pst[j]);
+    }
+    pst += UNIT;
+    pdt += UNIT;
+  }
+  for(; i < n8; i += 8) {
+    for(int j = 0; j < 8; j++) {
+      pdt[j] = func(pst[j]);
+    }
+    pst += 8;
+    pdt += 8;
+  }
+  int j = 0;
+  for(; i < n; i++) {
+    pdt[j] = func(pst[j]);
+    j++;
+  }
+}
+#endif
+
+//FUNC : TD(const PixPtr<T>&)
+template<class T, class FUNC, class TD = T>
+inline void paral_for_pp_r(const Mtx_<T>& src, Mtx_<TD>& dst,
+                           FUNC func)
+{
+#pragma omp parallel for
+  for(int y = 0; y < src.rows; y++) {
+    auto ps = src.createPixPtr(y, 0);
+    auto pd = dst.createPixPtr(y, 0);
+    for(int x = 0; x < src.cols; x++) {
+      pd(0, 0) = func(ps);
+      ps++;
+      pd++;
+    }
+  }
+}
+
+template<class T, class FUNC>
+inline void paral_for_offset(const Mtx_<T>& src, FUNC func)
+{
+#pragma omp parallel for
+  for(int y = 0; y < src.rows; y++) {
+    auto offset = src.calcOffset(y, 0);
+    for(int x = 0; x < src.cols; x++) {
+      func(offset);
+      offset++;
+    }
+  }
+}
+template<class T, class FUNC>
+inline void paral_for_pp_offset(const Mtx_<T>& src, FUNC func)
+{
+#pragma omp parallel for
+  for(int y = 0; y < src.rows; y++) {
+    auto offset = src.calcOffset(y, 0);
+    auto pp = src.createPixPtr(offset);
+    for(int x = 0; x < src.cols; x++) {
+      func(pp,offset);
+      offset++;
+    }
+  }
+}
 
 
 }  //namespace cvx
+
+#endif  //#if !defined(CVX_H)
