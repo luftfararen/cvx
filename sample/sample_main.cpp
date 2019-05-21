@@ -158,7 +158,7 @@ void f5(Mtx1b& src, Mtx1b& dst, int loop_count)
   StopWatch sw;
   for(int z = 0; z < loop_count; z++) {
     src.extrapolate();
-    paral_for_pp_r(src, dst, [](const  PixPtr<uchar>& pp)->uchar {  //OpenMP利用
+    paral_for_pp_(src, dst, [](const  PixPtr<uchar>& pp) {  //OpenMP利用
       return (pp(-1, -1) + 2 * pp(-1, 0) + pp(-1, 1) + 2 * pp(0, -1) + 4 * pp(0, 0) + 2 * pp(0, 1) +
               pp(1, -1) + 2 * pp(1, 0) + pp(1, 1)) /
           16;
@@ -179,10 +179,10 @@ void f6(Mtx1b& src, Mtx1b& dst, int loop_count)
   StopWatch sw;
   for(int z = 0; z < loop_count; z++) {
     src.extrapolate();
-    paral_for_pp_r(src, dst, [&](const auto& pp) {
+    paral_for_pp_(src, dst, [&](const auto& pp) {
 #if 1
       int sum = 0;
-      for_dy_dx(ker.radius, ker.radius, [&](int dy, int dx) { sum += pp(dy, dx) * ker(dy, dx); });
+      for_dydx(ker.radius, ker.radius, [&](int dy, int dx) { sum += pp(dy, dx) * ker(dy, dx); });
       return sum / 16;
 #else
       return ker.convolute(pp) / 16;
@@ -210,7 +210,7 @@ void f7(Mtx1b& src, Mtx1b& dst, int loop_count)
       auto pd = dst[y];
       int sum[4096] = {};
       //for(int i=0;i<sum.size();i++) sum[i] = 0;
-      for_dy_dx(ker.radius, ker.radius, [&](int dy, int dx) {
+      for_dydx(ker.radius, ker.radius, [&](int dy, int dx) {
         int k = ker(dy, dx);
         auto ps = src[0] + src.stepT() * (dy + y) + dx;
         for_ps_pd_idx_old<32>(ps, sum, w,
@@ -240,7 +240,7 @@ void f7_1(Mtx1b& src, Mtx1b& dst, int loop_count)
       auto pd = dst[y];
       auto pp = src.createPixPtr(y, 0);
       int sum[4096] = {};
-      for_dy_dx(ker.radius, ker.radius, [&](int dy, int dx) {
+      for_dydx(ker.radius, ker.radius, [&](int dy, int dx) {
         int k = ker(dy, dx);
         auto ps = pp.ptr(dy, dx);
         for_ps_pd_idx_old<32>(ps, sum, w,
@@ -273,7 +273,7 @@ void f7_2(Mtx1b& src, Mtx1b& dst, int loop_count)
       auto pp = src.createPixPtr(y, 0);
       int sum[4096] = {};
       int j = 0;
-      for_dy_dx(1, 1, [&](int dy, int dx) {
+      for_dydx(1, 1, [&](int dy, int dx) {
         //int k = ker(dy, dx);
         int k = ker[j];
         auto ps = pp.ptr(dy, dx);
@@ -308,7 +308,7 @@ void f7_3(Mtx1b& src, Mtx1b& dst, int loop_count)
       auto pd = dst[y];
       int sum[4096] = {};
       int j = 0;
-      for_dy_dx(1, 1, [&](int dy, int dx) {
+      for_dydx(1, 1, [&](int dy, int dx) {
         int k = ker[j];
         auto ps = src[0] + src.stepT() * (dy + y) + dx;
         for_ps_pd_idx_old<32>(ps, sum, w,
@@ -341,12 +341,12 @@ void f7_4(Mtx1b& src, Mtx1b& dst, int loop_count)
       auto pd = dst[y];
       auto pp = src.createPixPtr(y, 0);
       alignas(32) int sum[4096] = {};
-      for_dy_dx(1, 1, [&](int dy, int dx) {
+      for_dydx(1, 1, [&](int dy, int dx) {
         const int k = ker(dy, dx);
         const auto ps = pp.ptr(dy, dx);
-        for_s_d<UNIT>(ps, sum, w, [&k](const auto& s, auto& d) { d += k * s; });
+        simd_for_n<UNIT>(ps, sum, w, [&k](const auto& s, auto& d) { d += k * s; });
       });
-      for_s_d<UNIT>(sum, pd, w, [](const auto& s, auto& d) { d = s / 16; });
+      simd_for_n<UNIT>(sum, pd, w, [](const auto& s, auto& d) { d = s / 16; });
     }
   }
   print_time(label, sw.lap() / loop_count, "bp");
@@ -374,7 +374,7 @@ void f7_4(Mtx1b& src, Mtx1b& dst, int loop_count)
 //				return k * pps(dy, dx); 
 //			});
 //    });
-//    paral_for_pp_r(tmp, dst, [&](const auto& pps) { return pps(0, 0) / 16; });
+//    paral_for_pp_(tmp, dst, [&](const auto& pps) { return pps(0, 0) / 16; });
 //  }
 //  print_time(label, sw.lap() / loop_count, "bp");
 //}
@@ -392,9 +392,9 @@ void f9(Mtx1b& src, Mtx1b& dst, int loop_count)
   for(int z = 0; z < loop_count; z++) {
     src.extrapolate();
     auto tmp = Mtx1i::createWithBorder(src.size(), sker.radius);
-    paral_for_pp_r(src, tmp, [&](const auto& pp) { return sker.convolute(pp, false); });
+    paral_for_pp_(src, tmp, [&](const auto& pp) { return sker.convolute(pp, false); });
     tmp.extrapolate();
-    paral_for_pp_r(tmp, dst, [&](const auto& pp) { return sker.convolute(pp, true) / 16; });
+    paral_for_pp_(tmp, dst, [&](const auto& pp) { return sker.convolute(pp, true) / 16; });
   }
   print_time(label, sw.lap() / loop_count, "bp");
 }
@@ -544,7 +544,7 @@ void f10_3(Mtx1b& src, Mtx1b& dst, int loop_count)
       for(int dy = -sker.radius; dy <= sker.radius; dy++) {
         const auto k = sker(dy);
         const auto psl = pps.ptr(dy, 0);
-        for_s_d<UNIT>(psl, vbuf, w, [&k](const auto& s, auto& d) { d += k * s; });
+        simd_for_n<UNIT>(psl, vbuf, w, [&k](const auto& s, auto& d) { d += k * s; });
       }
       vbuf[-1] = vbuf[0];
       vbuf[w] = vbuf[w - 1];
@@ -552,9 +552,9 @@ void f10_3(Mtx1b& src, Mtx1b& dst, int loop_count)
       for(int dx = -sker.radius; dx <= sker.radius; dx++) {
         const auto k = sker(dx);
         const auto ptl = vbuf + dx;
-        for_s_d<UNIT>(ptl, bufh, w, [&k](const auto& s, auto& d) { d += k * s; });
+        simd_for_n<UNIT>(ptl, bufh, w, [&k](const auto& s, auto& d) { d += k * s; });
       }
-      for_s_d<UNIT>(bufh, dst[y], w, [&](const auto& s, auto& d) { d = s / 16; });
+      simd_for_n<UNIT>(bufh, dst[y], w, [&](const auto& s, auto& d) { d = s / 16; });
     }
   }
   print_time(label, sw.lap() / loop_count, "bp");
@@ -584,7 +584,7 @@ void f10_4(Mtx1b& src, Mtx1b& dst, int loop_count)
       for(int dy = -sker.radius; dy <= sker.radius; dy++) {
         const auto k = sker(dy);
         const auto psl = pps.ptr(dy, 0);
-        for_s_d<UNIT>(psl, vbuf, w, [&k](const auto& s, auto& d) { d += k * s; });
+        simd_for_n<UNIT>(psl, vbuf, w, [&k](const auto& s, auto& d) { d += k * s; });
       }
       vbuf[-1] = vbuf[0];
       vbuf[w] = vbuf[w - 1];
@@ -592,9 +592,9 @@ void f10_4(Mtx1b& src, Mtx1b& dst, int loop_count)
       for(int dx = -sker.radius; dx <= sker.radius; dx++) {
         const auto k = sker(dx);
         const auto ptl = vbuf + dx;
-        for_s_d<UNIT>(ptl, bufh, w, [&k](const auto& s, auto& d) { d += k * s; });
+        simd_for_n<UNIT>(ptl, bufh, w, [&k](const auto& s, auto& d) { d += k * s; });
       }
-      for_s_d<UNIT>(bufh, dst[y], w, [&](const auto& s, auto& d) { d = s / 16; });
+      simd_for_n<UNIT>(bufh, dst[y], w, [&](const auto& s, auto& d) { d = s / 16; });
     }
   }
   print_time(label, sw.lap() / loop_count, "bp");
@@ -624,7 +624,7 @@ void f10_5(Mtx1b& src, Mtx1b& dst, int loop_count)
       for(int dy = -sker.radius; dy <= sker.radius; dy++) {
         const auto k = sker(dy);
         const auto psl = pps.ptr(dy, 0);
-        for_s_d<UNIT>(psl, vbuf, w, [&k](const auto& s, auto& d) { d += k * s; });
+        simd_for_n<UNIT>(psl, vbuf, w, [&k](const auto& s, auto& d) { d += k * s; });
       }
       vbuf[-1] = vbuf[0];
       vbuf[w] = vbuf[w - 1];
@@ -632,9 +632,9 @@ void f10_5(Mtx1b& src, Mtx1b& dst, int loop_count)
       for(int dx = -sker.radius; dx <= sker.radius; dx++) {
         const auto k = sker(dx);
         const auto ptl = vbuf + dx;
-        for_s_d<UNIT>(ptl, bufh, w, [&k](const auto& s, auto& d) { d += k * s; });
+        simd_for_n<UNIT>(ptl, bufh, w, [&k](const auto& s, auto& d) { d += k * s; });
       }
-      for_s_d<UNIT>(bufh, dst[y], w, [&](const auto& s, auto& d) { d = s / 16; });
+      simd_for_n<UNIT>(bufh, dst[y], w, [&](const auto& s, auto& d) { d = s / 16; });
     }
   }
   print_time(label, sw.lap() / loop_count, "bp");
@@ -655,7 +655,7 @@ void f11(Mtx1b& src, Mtx1b& dst, int loop_count)
 
   //わかりやすさのためにborder抜きの画像を作る、時間計測からは除外
   Mtx1b tmp(h, w);
-  paral_for_pp_r(src, tmp, [&](const auto& pp) { return pp(0, 0); });
+  paral_for_pp_(src, tmp, [&](const auto& pp) { return pp(0, 0); });
 
   StopWatch sw;
   for(int z = 0; z < loop_count; z++) {
@@ -684,6 +684,8 @@ void f11(Mtx1b& src, Mtx1b& dst, int loop_count)
   print_time(label, sw.lap() / loop_count);
 }
 
+#if defined(_MSC_VER)
+
 void f12(Mtx1b& src, Mtx1b& dst, int loop_count)
 {
   using namespace std;
@@ -702,7 +704,7 @@ void f12(Mtx1b& src, Mtx1b& dst, int loop_count)
 
   StopWatch sw;
   for(int z = 0; z < loop_count; z++) {
-    paral_for_pp_r(src, tmp, [&](const auto& pp) { return pp(0, 0); });
+    paral_for_pp_(src, tmp, [&](const auto& pp) { return pp(0, 0); });
 
     cc::extent<2> ext(h, w);
     texture<uint, 2> stex(ext, tmp[0], h * w * 4, 32);
@@ -725,7 +727,7 @@ void f12(Mtx1b& src, Mtx1b& dst, int loop_count)
       dtex.set(idx, sum / 16);
     });
     cg::copy(dtex, tmp2[0], h * w * 4);
-    paral_for_pp_r(tmp2, dst, [&](const auto& pp) { return pp(0, 0); });
+    paral_for_pp_(tmp2, dst, [&](const auto& pp) { return pp(0, 0); });
   }
   print_time(label, sw.lap() / loop_count);
 }
@@ -747,7 +749,7 @@ void f13(Mtx1b& src, Mtx1b& dst, int loop_count)
   Mtx1f tmp(h, w);
   Mtx1f tmp2(h, w);
   for(int z = 0; z < loop_count; z++) {
-    paral_for_pp_r(src, tmp, [&](const auto& pp) { return pp(0, 0); });
+    paral_for_pp_(src, tmp, [&](const auto& pp) { return pp(0, 0); });
     cc::extent<2> ext(h, w);
     texture<float, 2> stex(ext, tmp[0], h * w * 4, 32);
     texture_view<const float, 2> sview(stex);
@@ -769,7 +771,7 @@ void f13(Mtx1b& src, Mtx1b& dst, int loop_count)
       dtex.set(idx, sum / 16);
     });
     cg::copy(dtex, tmp2[0], h * w * 4);
-    paral_for_pp_r(tmp2, dst, [&](const auto& pp) { return pp(0, 0); });
+    paral_for_pp_(tmp2, dst, [&](const auto& pp) { return pp(0, 0); });
   }
   print_time(label, sw.lap() / loop_count);
 }
@@ -792,7 +794,7 @@ void f13_1(Mtx1b& src, Mtx1b& dst, int loop_count)
   Mtx1f tmp2(h, w);
 
   for(int z = 0; z < loop_count; z++) {
-    paral_for_pp_r(src, tmp, [&](const auto& pp) { return pp(0, 0); });
+    paral_for_pp_(src, tmp, [&](const auto& pp) { return pp(0, 0); });
     cc::extent<2> ext(h, w);
     array_view<float, 2> sview(ext, tmp[0]);
     array_view<float, 2> dview(ext, tmp2[0]);
@@ -811,7 +813,7 @@ void f13_1(Mtx1b& src, Mtx1b& dst, int loop_count)
       }
       dview[idx] = sum / 16;
     });
-    paral_for_pp_r(tmp2, dst, [&](const auto& pp) { return pp(0, 0); });
+    paral_for_pp_(tmp2, dst, [&](const auto& pp) { return pp(0, 0); });
   }
   print_time(label, sw.lap() / loop_count);
 }
@@ -833,7 +835,7 @@ void f13_2(Mtx1b& src, Mtx1b& dst, int loop_count)
   Mtx1f tmp(h, w);
   Mtx1f tmp2(h, w);
   for(int z = 0; z < loop_count; z++) {
-    paral_for_pp_r(src, tmp, [&](const auto& pp) { return pp(0, 0); });
+    paral_for_pp_(src, tmp, [&](const auto& pp) { return pp(0, 0); });
     cc::extent<2> ext(h, w);
     texture<float, 2> stex(ext, tmp[0], h * w * 4, 32);
     const texture_view<const float, 2> sview(stex);
@@ -852,7 +854,7 @@ void f13_2(Mtx1b& src, Mtx1b& dst, int loop_count)
       dtex.set(idx, sum / 16);
     });
     cg::copy(dtex, tmp2[0], h * w * 4);
-    paral_for_pp_r(tmp2, dst, [&](const auto& pp) { return uchar(pp(0, 0)); });
+    paral_for_pp_(tmp2, dst, [&](const auto& pp) { return uchar(pp(0, 0)); });
   }
   print_time(label, sw.lap() / loop_count);
 }
@@ -872,7 +874,7 @@ void f14(Mtx1b& src, Mtx1b& dst, int loop_count)
 
   Mtx1f tmp(h, w);
   Mtx1f tmp2(h, w);
-  paral_for_pp_r(src, tmp, [&](const auto& pp) { return pp(0, 0); });
+  paral_for_pp_(src, tmp, [&](const auto& pp) { return pp(0, 0); });
   StopWatch sw;
   for(int z = 0; z < loop_count; z++) {
     cc::extent<2> ext(h, w);
@@ -898,7 +900,7 @@ void f14(Mtx1b& src, Mtx1b& dst, int loop_count)
     cg::copy(dtex, tmp2[0], h * w * 4);
   }
   print_time(label, sw.lap() / loop_count);
-  paral_for_pp_r(tmp2, dst, [&](const auto& pp) { return pp(0, 0); });
+  paral_for_pp_(tmp2, dst, [&](const auto& pp) { return pp(0, 0); });
 }
 
 void f14_1(Mtx1b& src, Mtx1b& dst, int loop_count)
@@ -916,7 +918,7 @@ void f14_1(Mtx1b& src, Mtx1b& dst, int loop_count)
 
   Mtx1f tmp(h, w);
   Mtx1f tmp2(h, w);
-  paral_for_pp_r(src, tmp, [&](const auto& pp) { return pp(0, 0); });
+  paral_for_pp_(src, tmp, [&](const auto& pp) { return pp(0, 0); });
   StopWatch sw;
   for(int z = 0; z < loop_count; z++) {
     cc::extent<2> ext(h, w);
@@ -938,7 +940,7 @@ void f14_1(Mtx1b& src, Mtx1b& dst, int loop_count)
       dview[idx] = sum / 16;
     });
   }
-  paral_for_pp_r(tmp2, dst, [&](const auto& pp) { return pp(0, 0); });
+  paral_for_pp_(tmp2, dst, [&](const auto& pp) { return pp(0, 0); });
   print_time(label, sw.lap() / loop_count);
 }
 
@@ -957,7 +959,7 @@ void f14_2(Mtx1b& src, Mtx1b& dst, int loop_count)
 
   Mtx1f tmp(h, w);
   Mtx1f tmp2(h, w);
-  paral_for_pp_r(src, tmp, [&](const PixPtr<uchar>& pp) { return pp(0, 0); });
+  paral_for_pp_(src, tmp, [&](const PixPtr<uchar>& pp) { return pp(0, 0); });
   StopWatch sw;
   for(int z = 0; z < loop_count; z++) {
     cc::extent<2> ext(h, w);
@@ -980,8 +982,9 @@ void f14_2(Mtx1b& src, Mtx1b& dst, int loop_count)
     cg::copy(dtex, tmp2[0], h * w * 4);
   }
   print_time(label, sw.lap() / loop_count);
-  paral_for_pp_r(tmp2, dst, [&](const auto& pp) { return uchar(pp(0, 0)); });
+  paral_for_pp_(tmp2, dst, [&](const auto& pp) { return uchar(pp(0, 0)); });
 }
+#endif //#if defined(_MSC_VER)
 
 void f15(Mtx1b& src, Mtx1b& dst, int loop_count)
 {
@@ -1244,7 +1247,7 @@ int main5()
   //cout << "入力" << endl;
   //print(mtx2);
   StopWatch sw;
-  paral_for_pp_r(mtx2, mtx, [](const auto& ps) {
+  paral_for_pp_(mtx2, mtx, [](const auto& ps) {
     return std::clamp(ps(-1, -1) - ps(-1, 1) + ps(0, -1) * 2 - ps(0, 1) * 2 + ps(1, -1) - ps(1, 1),
                       0, 255);
   });

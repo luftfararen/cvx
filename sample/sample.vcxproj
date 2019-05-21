@@ -50,7 +50,7 @@
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'" Label="Configuration">
     <ConfigurationType>Application</ConfigurationType>
     <UseDebugLibraries>false</UseDebugLibraries>
-    <PlatformToolset>v142</PlatformToolset>
+    <PlatformToolset>llvm</PlatformToolset>
     <WholeProgramOptimization>true</WholeProgramOptimization>
     <CharacterSet>Unicode</CharacterSet>
   </PropertyGroup>
@@ -170,6 +170,7 @@
     <ClInclude Include="..\amp_utils.h" />
     <ClInclude Include="..\cvx.h" />
     <ClInclude Include="..\cvx_exp.h" />
+    <ClInclude Include="..\stx.h" />
     <ClInclude Include="pch.h" />
   </ItemGroup>
   <ItemGroup>

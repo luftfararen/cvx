@@ -45,6 +45,14 @@ TEST(iround_test, float)
   EXPECT_EQ(iround(-1.5f), -2);
   EXPECT_EQ(iround(-1.4f), -1);
 }
+TEST(fast_iround_test, float)
+{
+  EXPECT_EQ(fast_iround(1.f), 1);
+  EXPECT_EQ(fast_iround(1.4f), 1);
+  EXPECT_EQ(fast_iround(1.5f), 2);
+  EXPECT_EQ(fast_iround(-1.5f), -2);
+  EXPECT_EQ(fast_iround(-1.4f), -1);
+}
 
 TEST(iround_test, double)
 {
@@ -55,6 +63,15 @@ TEST(iround_test, double)
 	EXPECT_EQ(iround(-1.4), -1);
 }
 
+TEST(fast_iround_test, double)
+{
+  EXPECT_EQ(fast_iround(1.0), 1);
+  EXPECT_EQ(fast_iround(1.4), 1);
+  EXPECT_EQ(fast_iround(1.5), 2);
+  EXPECT_EQ(fast_iround(-1.5), -2);
+  EXPECT_EQ(fast_iround(-1.4), -1);
+}
+
 TEST(iround_test, long_double)
 {
 	EXPECT_EQ(iround(1.0l), 1);
@@ -62,6 +79,15 @@ TEST(iround_test, long_double)
 	EXPECT_EQ(iround(1.5l), 2);
 	EXPECT_EQ(iround(-1.5l), -2);
 	EXPECT_EQ(iround(-1.4l), -1);
+}
+
+TEST(fast_iround_test, long_double)
+{
+  EXPECT_EQ(fast_iround(1.0l), 1);
+  EXPECT_EQ(fast_iround(1.4l), 1);
+  EXPECT_EQ(fast_iround(1.5l), 2);
+  EXPECT_EQ(fast_iround(-1.5l), -2);
+  EXPECT_EQ(fast_iround(-1.4l), -1);
 }
 
 
